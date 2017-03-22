@@ -1,48 +1,80 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 import pandas as pd
 import numpy as np
 import os
+import re
+
+
 
 #	set directory from which we work
 cur_dir = os.getcwd()
 
 #	Temp: set filename of our data
-data_file_expressions = cur_dir + "/leukemia.txt"
+data_gene_expressions = cur_dir + "/leukemia.txt"
 data_pathways = cur_dir + "/pathways.txt"
 
-#subset = np.genfromtxt(data_pathways, delimiter = "\t")
-#print(subset)
 
-#	Clean-up our pathways file as per Subramanian et al 2005
-#	Any pathways/gene sets with less than 15 members are exluded,
+
+#	Clean-up our gene sets file as per Subramanian et al 2005.
+#	Any pathways/gene sets with less than 15 genes are exluded,
 #	as well as pathways/gene sets with "OBSOLETE" as one of the
-#	qualifiers in their description
+#	qualifiers in their description.
+#	We output the gene set in a new .txt file ending with "_clean"
+def gene_set_file_cleanup(file_name):
+	with open(file_name, 'r') as temp_file, open(file_name+'_clean.txt', 'w') as output_file:
+		#firstNlines=temp_file.readlines()[0:5]
+
+		print('\nFollowing gene sets will be removed: \n')
+		for line in temp_file:
+			#	Remove \n from end of line
+			line = line.rstrip('\n')
+			split_line = re.split(r'\t+', line)			
+			obsolete = "OBSOLETE"
+			if ( (obsolete in split_line[1]) == True ) or ( len(split_line) - 2 < 15 ) :
+				print('Removed:', split_line[0], '\t', 'value:', len(split_line) - 2)
+			else:
+				output_file.write(line + '\n')
 
 
 
-#	As we open a file we want to keep all data intact
-#	hence header = None and index_col = None
-df = pd.read_table(data_file_expressions, sep = '\t', header = None, index_col = None)
+#	Clean-up our gene list file and melt the values
+#	So we can parse through it
+def gene_list_dataframe_cleanup(file_name):
+	#	As we open a file we want to keep all data intact
+	#	hence header = None and index_col = None
+	df = pd.read_table(file_name, sep = '\t', header = None, index_col = None)
 
-#	Define first row as a future header/column names
-header = df.iloc[0,0:]
+	#	Define first row as a future header/column names
+	header = df.iloc[0,0:]
 
-#	Remove first row entire
-df = df[1:]
+	#	Remove first row entire
+	df = df[1:]
 
-#	Define column names as our header
-df.columns = header
+	#	Define column names as our header
+	df.columns = header
 
-#	Melt our dataframe into a manageable form
-df = pd.melt(df, id_vars=['gene/patient'], var_name = 'phenotype')
-#	print(df)
+	#	Melt our dataframe into a manageable form
+	df = pd.melt(df, id_vars=['gene/patient'], var_name = 'phenotype')
+	return df
+	
+
+
+#	Function to scramble our phenotypes inside the dataframe
+#	Work with beginning gene list!
+#	Needed to create ES forward on
+def scramble_gene_list_dataframe(input_dataframe):
+	phenotype = input_dataframe['phenotype']
+	phenotype = phenotype.sample(frac = 1).reset_index(drop = True)
+	input_dataframe['phenotype'] = phenotype
+
+
 
 #	Parse through out dataframe and define a dictionary,
 #	that holds our whole set of gene dictionaries
 #	That dictionary -> {gene : {phenotype1 : [counts], 
 #								phenotype2 : [counts]}}
-def input_signals (input_dataframe):
+def raw_gene_list_dataframe(input_dataframe):
 
 	input_dict = dict()
 
@@ -62,7 +94,7 @@ def input_signals (input_dataframe):
 			else:
 	#	Define set[gene][phenotype] as a new dictionary
 				input_dict[gene][phenotype] = dict()
-				input_dict[gene][phenotype] = [count] # GOTTA DEFINE AS A LIST
+				input_dict[gene][phenotype] = [count] # GOTTA DEFINE AS A LIST!
 		else:
 	#	Define set[gene] as a new dictionary
 	#	Define set[gene][phenotype] as a new dictionary
@@ -73,43 +105,171 @@ def input_signals (input_dataframe):
 	return input_dict
 
 
-input_dict = input_signals(df)
-
-#	Function to calculate our signal to noise ratio
-def signal_to_noise (list1, list2):
-	mju1 = np.mean(list1)
-	mju2 = np.mean(list2)
-	sigma1 = np.std(list1)
-	sigma2 = np.std(list2)
-	return ( (mju1 - mju2) / (sigma1 + sigma2) )
-
-#	list1 = set['TUBA1']['ALL']
-#	list2 = set['TUBA1']['AML']
-#	test = signal_to_noise(list1, list2)
-#	print(test)
 
 #	Function that parses through the dictionary of input signals
 #	and returns dictionary in a form of gene:signal to noise ratio
-def get_signal_to_noise (dictionary_in):
+#	in regards ALL on top and AML on bottom
+def get_signal_to_noise(input_dictionary):
 	dictionary_out = dict()
-	for gene in dictionary_in:
-		list1 = dictionary_in[gene]['ALL']
-		list2 = dictionary_in[gene]['AML']
+
+
+	#	Function to calculate our signal to noise ratio
+	#	Called inside func get_signal_to_noise!
+	def signal_to_noise(list1, list2):
+		mju1 = np.mean(list1)
+		mju2 = np.mean(list2)
+		sigma1 = np.std(list1)
+		sigma2 = np.std(list2)
+		return ( (mju1 - mju2) / (sigma1 + sigma2) )
+
+
+	for gene in input_dictionary:
+		list1 = input_dictionary[gene]['ALL']
+		list2 = input_dictionary[gene]['AML']
 		dictionary_out[gene] = signal_to_noise(list1, list2)
 	return dictionary_out
 
-test = get_signal_to_noise(input_dict)
 
-#	print(test)
 
-#	Again we create a DataFramem, modify it and sort the values
-def sort_values (dictionary_in):
-	dataframe_out = pd.DataFrame(dictionary_in, index = [0])
+#	We take a dictionary, turn it into a dataframe, 
+#	sort the dataframe in descending order in regards 
+#	to of signal-to-noise ratio. High StNR is correlated
+#	to ALL, low StNR is correlated to AML
+	
+def sort_gene_list_dataframe_values(input_dictionary):
+	dataframe_out = pd.DataFrame(input_dictionary, index = [0])
 	dataframe_out = dataframe_out.transpose()
 	#	Define the values as Signal-to-Noise Ratio (StNR)
 	dataframe_out.columns = ['StNR']
 	dataframe_out = dataframe_out.sort_values(by = 'StNR', ascending = False)
 	return dataframe_out
 
-reference_dataframe = sort_values(test)
-print(reference_dataframe)
+
+
+#	i = len(reference_dataframe.iloc[0:,0:0])
+#	k = reference_dataframe.iloc[i-1:i, 0:1]
+#	print(reference_dataframe.iloc[i-1:i, 0:0])
+#	print(i, k)
+#	print(reference_dataframe.index[0])
+#	print(reference_dataframe.iloc[0]['StNR'])
+
+#-----------------------------------------------------------------------------#
+
+
+
+
+#	gene_set_file_cleanup(data_pathways)
+#	beginning_gene_list_df = gene_list_dataframe_cleanup(data_gene_expressions)
+#	working_gene_list_df = raw_gene_list_dataframe(beginning_gene_list_df)
+#	working_gene_list_dict = get_signal_to_noise(working_gene_list_df)
+#	working_gene_list_df = sort_gene_list_dataframe_values(working_gene_list_dict)
+
+#	scramble_gene_list_dataframe(beginning_gene_list_df)
+#	print(beginning_gene_list_df)
+#	print(working_gene_list_df)
+
+
+
+
+#------------------------------------------------------------------------------#
+
+def create_ES(file_name_expressions, file_name_pathways):
+
+	gene_set_file_cleanup(file_name_pathways)
+	beginning_gene_list_df = gene_list_dataframe_cleanup(file_name_expressions)
+	working_gene_list_df = raw_gene_list_dataframe(beginning_gene_list_df)
+	working_gene_list_dict = get_signal_to_noise(working_gene_list_df)
+	working_gene_list_df = sort_gene_list_dataframe_values(working_gene_list_dict)
+
+	#	define N
+	N = working_gene_list_df.shape[0]
+#	working_gene_list.df = working_gene_list_df.round(6)
+#	print(working_gene_list.df)
+
+	print('\nCalculating ES\n')
+
+	#	Define list gene_set_series that will serve as an index in our
+	#	final dataframe
+	#	Define dictionary ES_dictionary that will serve as columns for
+	#	all our ES's (original and permutated ones) in our final dataframe
+	gene_set_series = list()
+	ES_dictionary = dict()
+	with open(file_name_pathways+'_clean.txt', 'r') as gene_set:
+		for line in gene_set:
+			split_line = re.split(r'\t+', line)
+			pathway = split_line[0]
+			gene_set_series.append(pathway)
+
+	#	Get our ES_series and append it to our dataframe
+	with open(file_name_pathways+'_clean.txt', 'r') as gene_set:
+
+		#	1000 permutations in order to create ESnull
+		for i in range(0, 100):
+
+			ES_series = list()
+			#	Parse through whole data in order to calculate ES for
+			#	each gene set
+			for line in gene_set:
+
+				#	Get ES for each gene set
+				def get_ES(line):
+
+					line = line.rstrip('\n')
+					split_line = re.split(r'\t+', line)
+					#	Define genes as a list in a split line
+					genes = split_line[2 : len(split_line)]
+
+
+					#	Calculate Nr and define Nh
+					#	Iterating through row by row				
+					Nh = 0
+					Nr = 0
+					for row in working_gene_list_df.itertuples():
+						gene = row[0]
+						r = abs(row[1])
+						if gene in genes:
+							Nr = Nr + r
+							Nh = Nh + 1
+
+					#Define Pmiss
+					Pmiss = 1 / (N - Nh)
+
+					ES = 0
+					ESlist = list()
+					#	Get all ES values
+					for row in working_gene_list_df.itertuples():
+						gene = row[0]
+						r = abs(row[1])
+						if gene in genes:
+							ES = ES + (r / Nr)
+						else:
+							ES = ES - Pmiss
+						ESlist.append(ES)
+
+					if abs(max(ESlist)) > abs(min(ESlist)):
+						ES = max(ESlist)
+					else:
+						ES = min(ESlist)
+					return(ES)
+
+				ES = get_ES(line)
+				ES_series.append(ES)
+			ES_dictionary['ES' + str(i)]	= ES_series
+
+			gene_set.seek(0)
+
+			#	Create a permutation and start over again
+			scramble_gene_list_dataframe(beginning_gene_list_df)
+			working_gene_list_df = raw_gene_list_dataframe(beginning_gene_list_df)
+			working_gene_list_dict = get_signal_to_noise(working_gene_list_df)
+			working_gene_list_df = sort_gene_list_dataframe_values(working_gene_list_dict)
+
+			print('Permutation', i, 'completed')
+
+#		print(gene_set_series)
+#		print(ES_series)
+		test_dataframe = pd.DataFrame(ES_dictionary, index = gene_set_series)
+		print(test_dataframe)
+
+
+create_ES(data_gene_expressions, data_pathways)
