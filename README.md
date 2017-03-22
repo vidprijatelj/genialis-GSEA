@@ -6,7 +6,7 @@ Create and implement GSEA (Gene Set Enrichment Analysis)
 
 Copy the repository to your preferred location. 
 
-All files should be on the same directory ("leukemia.txt" and "pathways.txt" included).
+All files should be in the same directory ("leukemia.txt" and "pathways.txt" included).
 
 File "pathways.txt_clean.txt" can easily be ignored and/or deleted.
 
