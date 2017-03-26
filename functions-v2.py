@@ -174,9 +174,9 @@ def sort_gene_list_dataframe_values(input_dictionary):
 
 
 
-
 #------------------------------------------------------------------------------#
-
+#	Calculate ES by creating Pandas tables
+#------------------------------------------------------------------------------#
 
 def create_ES_tables(file_name_expressions, file_name_pathways):
 
@@ -281,6 +281,10 @@ def create_ES_tables(file_name_expressions, file_name_pathways):
 	print(test_dataframe)
 
 
+
+#------------------------------------------------------------------------------#
+#	Calculate ES by using dictionaries
+#------------------------------------------------------------------------------#
 
 def create_ES_dictionaries(file_name_expressions, file_name_pathways):
 
