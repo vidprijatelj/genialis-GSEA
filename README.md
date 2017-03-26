@@ -18,5 +18,6 @@ Certain methods may not work outside the Linux/GNU ecosystem. Modifiy the file(s
 
 ### How to run
 
-Run file "functions.py"
+Run file "functions.py".
+
 Wait for n iterations to be completed (n = 100 ATM)
