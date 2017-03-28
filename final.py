@@ -12,9 +12,9 @@ import time
 cur_dir = os.getcwd()
 
 #	Temp: set filename of our data
-data_gene_expressions = cur_dir + "/leukemia.txt"
-data_pathways = cur_dir + "/pathways.txt"
-
+data_gene_expressions = cur_dir + '/leukemia.txt'
+data_pathways = cur_dir + '/pathways.txt'
+data_intermediate = cur_dir + '/ES_table.csv'
 
 
 #	Clean-up our gene sets file as per Subramanian et al 2005.
@@ -122,7 +122,7 @@ def signal_to_noise_sort_dataframe(input_dataframe):
 
 #######################################################################
 
-
+'''
 #--------#
 #	Version 2
 #	Mixed bag
@@ -285,7 +285,7 @@ def create_ES_tables(file_name_expressions, file_name_pathways):
 	print('\nCalculating ES\n')
 
 	#	1000 permutations in order to create ESnull	
-	for i in range(0, 200):	
+	for i in range(0, 1001):	
 
 		print('Creating permutation No.', + i)
 		#	Parse through whole pathways data in order to calculate ES for
@@ -310,11 +310,148 @@ def create_ES_tables(file_name_expressions, file_name_pathways):
 		
 #		print(gene_set_series)
 #		print(ES_series)
-	print(ES_dataframe)
+	return ES_dataframe
 
 
 
 t = time.process_time()
-create_ES_tables(data_gene_expressions, data_pathways)
+ES_dataframe = create_ES_tables(data_gene_expressions, data_pathways)
+ES_dataframe.to_csv(cur_dir+'/ES_table.csv', sep = '\t')
 elapsed_time = time.process_time() - t
 print(elapsed_time)
+'''
+'''
+#	We define dataframes: ES_S that contains pathways and their calculated ES's
+#	and ES_null_dataframe that contains pathways and all shuffled permuted ES's
+def define_ES_dataframes(ES_df):
+	ES_S = ES_df['ES0']
+	ES_null_datafame = ES_df.iloc[:, ES_df.shape[1]-1]
+	return ES_dataframe, ES_null_datafame
+
+ES_S, ES_null_datafame = define_ES_dataframes(ES_dataframe)
+'''
+
+df = pd.DataFrame.from_csv(data_intermediate, sep = '\t')
+#print(df)
+ES_S = df['ES0']
+#print(ES_df)
+ES_null_dataframe = df.iloc[:, 1 : (df.shape[1])]
+print(ES_null_dataframe)
+# iloc[row(s), column(s)]
+# print(ES_null.iloc[2,:])
+# loc[row index]
+# print(ES_null.loc['etsPathway'])
+
+#	We calculate p values for all calculated ES's
+def calculate_p_values(ES_df, ES_null):
+	print('Calculating p values')
+	p_values_dictionary = dict()
+
+	for x in list(zip(ES_df.index, ES_df)):
+		pathway = x[0]
+		ES_value = x[1]
+		curr_pathway = ES_null.loc[pathway]
+		N = curr_pathway.size
+		n = curr_pathway[curr_pathway <= ES_value].size
+		p = n/N
+
+		#	Control for p value. p E (0, 0.5], p > 0.5 -> p = 1 - p
+		if p > 0.5:
+			p = 1 - p
+		#	Control for extreme p values
+		if p < 0.0001:
+			p = 0.00001
+		if p > 0.9999:
+			p = 0.99999
+		p_values_dictionary[pathway] = round(p, 5)
+	p_values_df = pd.DataFrame.from_dict(p_values_dictionary, orient = 'index')
+	p_values_df.columns = ['p value']
+	return p_values_df
+
+p_values_df = calculate_p_values(ES_S, ES_null_dataframe)
+
+
+
+#	We calculate NES values
+def calculate_NES_values(ES_df, ES_null):
+	print('Calculating all NES values')
+	NES_values_dictionary = dict()
+	NES_null_values_dictionary = dict()
+
+	#	Calculate our NES(S) values
+	for x in list(zip(ES_df.index, ES_df)):
+		pathway = x[0]
+		ES_value = x[1]
+		curr_pathway = ES_null.loc[pathway]
+		if ES_value > 0:
+			avrg = np.mean(curr_pathway[curr_pathway > 0].values)
+		else:
+			avrg = -(np.mean(curr_pathway[curr_pathway < 0].values))
+		NES = ES_value / avrg
+		NES_values_dictionary[pathway] = round(NES, 5)
+
+		#	Calculate our NES(S, pi) values
+		ES_null_pos = curr_pathway[curr_pathway > 0].values
+		ES_null_neg = curr_pathway[curr_pathway < 0].values
+		avrg_pos = np.mean(ES_null_pos)
+		avrg_neg = np.mean(ES_null_neg)
+		NES_null_pos = ES_null_pos / avrg_pos
+		NES_null_neg = -(ES_null_neg / avrg_neg)
+		NES_null = np.append(NES_null_pos, NES_null_neg)
+		NES_null_values_dictionary[pathway] = reound(NES_null, 5)
+
+	NES_values_df = pd.DataFrame.from_dict(NES_values_dictionary, orient = 'index')
+	NES_values_df.columns = ['NES value']
+	NES_values_pos_df = NES_values_df[NES_values_df['NES value'] > 0]
+	NES_values_neg_df = NES_values_df[NES_values_df['NES value'] < 0]
+	NES_null_values_df = pd.DataFrame.from_dict(NES_null_values_dictionary, orient = 'index')
+
+	return(NES_values_pos_df, NES_values_neg_df, NES_null_values_df)
+
+NES_values_pos_df, NES_values_neg_df, NES_null_values_df = calculate_NES_values(ES_S, ES_null_dataframe)
+
+
+
+#	We calculate q values
+def calculate_q_values(NES_values_pos_df, NES_values_neg_df, NES_null_values_df):
+	print('Calculating q values')
+	#print(NES_null_values_df[NES_null_values_df > 1].values.size)
+	#Calculate q values for all NES>0
+	q_values_dictionary = dict()
+	for x in list(zip(NES_values_pos_df.index, NES_values_pos_df['NES value'])):
+		pathway = x[0]
+		NES_S = x[1]
+		F = (NES_null_values_df[NES_null_values_df >= NES_S].stack().values.size) / NES_null_values_df.size
+		N_plus = NES_values_pos_df.size
+		D_S_size = NES_values_pos_df[NES_values_pos_df['NES value'] >= NES_S].size
+		q_value = (F * N_plus) / D_S_size
+		q_values_dictionary[pathway] = q_value
+
+
+	#Calculate q values for all NES<0
+	for x in list(zip(NES_values_neg_df.index, NES_values_neg_df['NES value'])):
+		pathway = x[0]
+		NES_S = x[1]
+		F = (NES_null_values_df[NES_null_values_df <= NES_S].stack().values.size) / NES_null_values_df.size
+		N_neg = NES_values_neg_df.size
+		D_S_size = NES_values_neg_df[NES_values_neg_df['NES value'] <= NES_S].size
+		q_value = (F * N_neg) / D_S_size
+		q_values_dictionary[pathway] = q_value
+
+	q_values_df = pd.DataFrame.from_dict(q_values_dictionary, orient = 'index')
+	q_values_df.columns = ['q value']
+	q_values_df = q_values_df.sort_values(by = 'q value')
+
+	return q_values_df
+
+q_values_df = calculate_q_values(NES_values_pos_df, NES_values_neg_df, NES_null_values_df)
+
+
+NES_values_final_df = NES_values_df.copy()
+NES_values_final_df = NES_values_final_df.apply(abs)
+
+NES_values_final_df = NES_values_final_df.join(p_values_df)
+NES_values_final_df = NES_values_final_df.join(q_values_df)
+NES_values_final_df = NES_values_final_df.sort_values(by = 'q value')
+print(NES_values_final_df)'''
+
