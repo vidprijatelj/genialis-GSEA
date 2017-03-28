@@ -17,6 +17,7 @@ data_pathways = cur_dir + '/pathways.txt'
 data_intermediate = cur_dir + '/ES_table.csv'
 
 
+
 #	Clean-up our gene sets file as per Subramanian et al 2005.
 #	Any pathways/gene sets with less than 15 genes are exluded,
 #	as well as pathways/gene sets with "OBSOLETE" as one of the
@@ -27,14 +28,15 @@ def gene_set_file_cleanup(file_name):
 	with open(file_name, 'r') as temp_file, open(file_name+'_clean.txt', 'w') as output_file:
 		#firstNlines=temp_file.readlines()[0:5]
 
-		print('\nFollowing gene sets will be removed: \n')
+		print('Removing obsolete pathways - the ones with "OBSOLETE" in their description')
+		print('or the ones with less than 15 genes in their gene set')
 		for line in temp_file:
 			#	Remove \n from end of line
 			line = line.rstrip('\n')
 			split_line = re.split(r'\t+', line)			
 			obsolete = "OBSOLETE"
 			if ( (obsolete in split_line[1]) == True ) or ( len(split_line) - 2 < 15 ) :
-				print('Removed:', split_line[0], '\t', 'value:', len(split_line) - 2)
+				pass
 			else:
 				output_file.write(line + '\n')
 				gene_set_dict[split_line[0]] = split_line[2 : len(split_line)]
@@ -122,7 +124,7 @@ def signal_to_noise_sort_dataframe(input_dataframe):
 
 #######################################################################
 
-'''
+
 #--------#
 #	Version 2
 #	Mixed bag
@@ -316,35 +318,35 @@ def create_ES_tables(file_name_expressions, file_name_pathways):
 
 t = time.process_time()
 ES_dataframe = create_ES_tables(data_gene_expressions, data_pathways)
+#	Create backup
 ES_dataframe.to_csv(cur_dir+'/ES_table.csv', sep = '\t')
 elapsed_time = time.process_time() - t
-print(elapsed_time)
-'''
-'''
+print()
+print('Time:', elapsed_time,'s')
+print()
+
+
+
+#------------------------------------------------------------------------------#
+#	Calculate statistics
+#------------------------------------------------------------------------------#
+
+
+
 #	We define dataframes: ES_S that contains pathways and their calculated ES's
 #	and ES_null_dataframe that contains pathways and all shuffled permuted ES's
 def define_ES_dataframes(ES_df):
 	ES_S = ES_df['ES0']
-	ES_null_datafame = ES_df.iloc[:, ES_df.shape[1]-1]
-	return ES_dataframe, ES_null_datafame
+	ES_null_dataframe = ES_df.iloc[:, 1:(ES_df.shape[1])]
+	return ES_S, ES_null_dataframe
 
-ES_S, ES_null_datafame = define_ES_dataframes(ES_dataframe)
-'''
+ES_S, ES_null_dataframe = define_ES_dataframes(ES_dataframe)
 
-df = pd.DataFrame.from_csv(data_intermediate, sep = '\t')
-#print(df)
-ES_S = df['ES0']
-#print(ES_df)
-ES_null_dataframe = df.iloc[:, 1 : (df.shape[1])]
-print(ES_null_dataframe)
-# iloc[row(s), column(s)]
-# print(ES_null.iloc[2,:])
-# loc[row index]
-# print(ES_null.loc['etsPathway'])
+
 
 #	We calculate p values for all calculated ES's
 def calculate_p_values(ES_df, ES_null):
-	print('Calculating p values')
+	print('Calculating p values\n')
 	p_values_dictionary = dict()
 
 	for x in list(zip(ES_df.index, ES_df)):
@@ -358,12 +360,7 @@ def calculate_p_values(ES_df, ES_null):
 		#	Control for p value. p E (0, 0.5], p > 0.5 -> p = 1 - p
 		if p > 0.5:
 			p = 1 - p
-		#	Control for extreme p values
-		if p < 0.0001:
-			p = 0.00001
-		if p > 0.9999:
-			p = 0.99999
-		p_values_dictionary[pathway] = round(p, 5)
+		p_values_dictionary[pathway] = p
 	p_values_df = pd.DataFrame.from_dict(p_values_dictionary, orient = 'index')
 	p_values_df.columns = ['p value']
 	return p_values_df
@@ -374,7 +371,7 @@ p_values_df = calculate_p_values(ES_S, ES_null_dataframe)
 
 #	We calculate NES values
 def calculate_NES_values(ES_df, ES_null):
-	print('Calculating all NES values')
+	print('Calculating all NES values\n')
 	NES_values_dictionary = dict()
 	NES_null_values_dictionary = dict()
 
@@ -398,7 +395,7 @@ def calculate_NES_values(ES_df, ES_null):
 		NES_null_pos = ES_null_pos / avrg_pos
 		NES_null_neg = -(ES_null_neg / avrg_neg)
 		NES_null = np.append(NES_null_pos, NES_null_neg)
-		NES_null_values_dictionary[pathway] = reound(NES_null, 5)
+		NES_null_values_dictionary[pathway] = NES_null
 
 	NES_values_df = pd.DataFrame.from_dict(NES_values_dictionary, orient = 'index')
 	NES_values_df.columns = ['NES value']
@@ -406,25 +403,25 @@ def calculate_NES_values(ES_df, ES_null):
 	NES_values_neg_df = NES_values_df[NES_values_df['NES value'] < 0]
 	NES_null_values_df = pd.DataFrame.from_dict(NES_null_values_dictionary, orient = 'index')
 
-	return(NES_values_pos_df, NES_values_neg_df, NES_null_values_df)
+	return(NES_values_df, NES_values_pos_df, NES_values_neg_df, NES_null_values_df)
 
-NES_values_pos_df, NES_values_neg_df, NES_null_values_df = calculate_NES_values(ES_S, ES_null_dataframe)
+NES_values_df, NES_values_pos_df, NES_values_neg_df, NES_null_values_df = calculate_NES_values(ES_S, ES_null_dataframe)
 
 
 
 #	We calculate q values
 def calculate_q_values(NES_values_pos_df, NES_values_neg_df, NES_null_values_df):
-	print('Calculating q values')
+	print('Calculating q values\n')
 	#print(NES_null_values_df[NES_null_values_df > 1].values.size)
 	#Calculate q values for all NES>0
 	q_values_dictionary = dict()
 	for x in list(zip(NES_values_pos_df.index, NES_values_pos_df['NES value'])):
 		pathway = x[0]
 		NES_S = x[1]
-		F = (NES_null_values_df[NES_null_values_df >= NES_S].stack().values.size) / NES_null_values_df.size
+		F = (NES_null_values_df[(NES_null_values_df >= NES_S) & (NES_null_values_df >= 0)].stack().values.size) / NES_null_values_df[NES_null_values_df >= 0].size
 		N_plus = NES_values_pos_df.size
-		D_S_size = NES_values_pos_df[NES_values_pos_df['NES value'] >= NES_S].size
-		q_value = (F * N_plus) / D_S_size
+		D_S_size_pos = NES_values_pos_df[NES_values_pos_df['NES value'] >= NES_S].size
+		q_value = (F * N_plus) / D_S_size_pos
 		q_values_dictionary[pathway] = q_value
 
 
@@ -432,10 +429,10 @@ def calculate_q_values(NES_values_pos_df, NES_values_neg_df, NES_null_values_df)
 	for x in list(zip(NES_values_neg_df.index, NES_values_neg_df['NES value'])):
 		pathway = x[0]
 		NES_S = x[1]
-		F = (NES_null_values_df[NES_null_values_df <= NES_S].stack().values.size) / NES_null_values_df.size
+		F = (NES_null_values_df[(NES_null_values_df <= NES_S) & (NES_null_values_df <= 0)].stack().values.size) / NES_null_values_df[NES_null_values_df <= 0].size
 		N_neg = NES_values_neg_df.size
-		D_S_size = NES_values_neg_df[NES_values_neg_df['NES value'] <= NES_S].size
-		q_value = (F * N_neg) / D_S_size
+		D_S_size_neg = NES_values_neg_df[NES_values_neg_df['NES value'] <= NES_S].size
+		q_value = (F * N_neg) / D_S_size_neg
 		q_values_dictionary[pathway] = q_value
 
 	q_values_df = pd.DataFrame.from_dict(q_values_dictionary, orient = 'index')
@@ -447,11 +444,14 @@ def calculate_q_values(NES_values_pos_df, NES_values_neg_df, NES_null_values_df)
 q_values_df = calculate_q_values(NES_values_pos_df, NES_values_neg_df, NES_null_values_df)
 
 
-NES_values_final_df = NES_values_df.copy()
-NES_values_final_df = NES_values_final_df.apply(abs)
-
-NES_values_final_df = NES_values_final_df.join(p_values_df)
-NES_values_final_df = NES_values_final_df.join(q_values_df)
-NES_values_final_df = NES_values_final_df.sort_values(by = 'q value')
-print(NES_values_final_df)'''
-
+final_df = NES_values_df.copy()
+#	Add p values dataframe
+final_df = final_df.join(p_values_df)
+#	Add q values dataframe
+final_df = final_df.join(q_values_df)
+#	Sort by p value
+final_df = final_df.sort_values(by = 'NES value', ascending = False)
+timestring = time.strftime('%Y_%m_%d-%H_%M_%S')
+data_final = cur_dir + '/GSEA_statistics_'+timestring+'.csv'
+print('GSEA finished. Results output to the file:', data_final'\n')
+final_df.to_csv(data_final, sep = '\t')
