@@ -1,4 +1,4 @@
-# Genialis recruitment task
+# Gene Set Enrichment Analysis test code
 
 Create and implement GSEA (Gene Set Enrichment Analysis)
 
